@@ -115,14 +115,23 @@ export default async function handler(req: any, res: any) {
   // 3. Exact MCP schema format
   // 4. Zero redirects, auth, or middleware
   
-  // Set required headers for MCP scanner (must be set before any response)
+  // Set required headers IMMEDIATELY - before any async operations
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("Content-Type", "application/json");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  
+  const method = req.method || "GET";
+  
+  // Handle OPTIONS preflight requests immediately - CRITICAL for scanner
+  if (method === "OPTIONS") {
+    return res.status(200).end();
+  }
   
   // Top-level error handler - ensure we always return a valid response
   try {
   
-  const method = req.method || "GET";
   const requestUrl = req.url || "/";
   
   // Safely parse URL - handle errors gracefully
@@ -177,10 +186,20 @@ export default async function handler(req: any, res: any) {
       body = {};
     }
     
+    // Check if this is a scan request (no tool name or missing required params)
     const toolName = body?.tool || body?.name;
+    const hasRequiredParams = 
+      (toolName === "generate_leverage_plan" && body?.goals && body?.constraints) ||
+      (toolName === "export_daily_brief" && body?.ranked_actions && body?.rationale_summary && body?.date);
     
-    // Only execute tools if explicitly requested with ALL required parameters
-    // This ensures scan requests (empty/minimal body) always return tool definitions
+    // If it's a scan request (empty/minimal body), return tools immediately
+    if (!hasRequiredParams) {
+      return res.status(200).json({
+        tools: TOOL_DEFINITIONS
+      });
+    }
+    
+    // Only execute tools if ALL required parameters are present
     if (toolName === "generate_leverage_plan" && body?.goals && body?.constraints) {
       try {
         const result = await generateLeveragePlan(body.goals, body.constraints, body.backlog);
@@ -213,8 +232,7 @@ export default async function handler(req: any, res: any) {
       }
     }
     
-    // All other POST requests to /mcp are scan/discovery requests
-    // Return MCP-compliant response immediately - SYNCHRONOUS, no async operations
+    // Fallback: return tools for any other POST requests
     return res.status(200).json({
       tools: TOOL_DEFINITIONS
     });
