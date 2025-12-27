@@ -129,10 +129,28 @@ export default async function handler(req: any, res: any) {
     return res.status(200).end();
   }
   
+  const requestUrl = req.url || "/";
+  
+  // AGGRESSIVE PATH DETECTION: Catch ANY request that looks like /mcp (base path)
+  // This must happen BEFORE any async operations to avoid timeouts
+  const isMcpBaseRequest = 
+    requestUrl === "/mcp" ||
+    requestUrl === "/api/mcp" ||
+    requestUrl.startsWith("/mcp?") ||
+    requestUrl.startsWith("/api/mcp?") ||
+    requestUrl.startsWith("/mcp&") ||
+    requestUrl.startsWith("/api/mcp&") ||
+    (requestUrl.includes("/mcp") && !requestUrl.includes("/mcp/") && !requestUrl.match(/\/mcp\/[^?]/));
+  
+  // For GET requests to base /mcp, return immediately - NO async operations
+  if (method === "GET" && isMcpBaseRequest) {
+    return res.status(200).json({
+      tools: TOOL_DEFINITIONS
+    });
+  }
+  
   // Top-level error handler - ensure we always return a valid response
   try {
-  
-  const requestUrl = req.url || "/";
   
   // Safely parse URL - handle errors gracefully
   let pathParam: string | null = null;
@@ -162,14 +180,6 @@ export default async function handler(req: any, res: any) {
   // Check if this is a request to the base /mcp endpoint (not a sub-path like /mcp/tool_name)
   // This catches ALL variations: /mcp, /api/mcp, /mcp?, /api/mcp?path=/, etc.
   const isBaseMcpPath = cleanPath === "mcp" || cleanPath === "api/mcp" || cleanPath === "";
-  
-  // GET requests: always return tool definitions immediately (SYNCHRONOUS, no async)
-  if (method === "GET" && isBaseMcpPath) {
-    // Return MCP-compliant response immediately - no async operations
-    return res.status(200).json({
-      tools: TOOL_DEFINITIONS
-    });
-  }
   
   // POST requests to /mcp: handle tool invocations or return tool definitions
   if (method === "POST" && isBaseMcpPath) {
@@ -238,10 +248,10 @@ export default async function handler(req: any, res: any) {
     });
   }
   
-  // Safety check: If request looks like it might be a base /mcp request but didn't match above,
+  // ULTIMATE SAFETY CHECK: If request looks like it might be a base /mcp request but didn't match above,
   // return tools immediately to avoid timeout (better safe than sorry for scanner)
-  if ((method === "GET" || method === "POST") && 
-      (requestUrl.includes("/mcp") && !requestUrl.includes("/mcp/") && !cleanPath.includes("/"))) {
+  // This catches edge cases where path detection might have failed
+  if ((method === "GET" || method === "POST") && isMcpBaseRequest) {
     return res.status(200).json({
       tools: TOOL_DEFINITIONS
     });
